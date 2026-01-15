@@ -27,7 +27,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, GroupKFold
+try:
+    from sklearn.model_selection import StratifiedGroupKFold  # type: ignore
+except Exception:
+    StratifiedGroupKFold = None  # type: ignore
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 
@@ -115,6 +119,9 @@ def get_args() -> argparse.Namespace:
     g_cv.add_argument("--n_splits", type=int, default=5)
     g_cv.add_argument("--fold_idx", type=int, default=0, help="Fold index (0-based)")
     g_cv.add_argument("--seed", type=int, default=42)
+    g_cv.add_argument("--group_col", type=str, default="patient_id",
+                      help="Optional metadata column used to enforce patient-level grouping in CV. "
+                           "If present in internal_csv, GroupKFold/StratifiedGroupKFold will be used.")
 
     g_cache = parser.add_argument_group("Caching")
     g_cache.add_argument("--no_cache", dest="use_cache", action="store_false", help="Disable MONAI CacheDataset")
@@ -178,6 +185,16 @@ def find_nifti_by_id(directory: Path, file_id: str, exts: Sequence[str]) -> Opti
         if p.exists():
             return p
     return None
+
+
+# ---------------------------------------------------------------------
+# Reproducibility helpers (DataLoader worker seeding)
+# ---------------------------------------------------------------------
+def _seed_worker(worker_id: int) -> None:
+    """Ensure each DataLoader worker has a different, deterministic RNG state."""
+    worker_seed = (torch.initial_seed() + worker_id) % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 # =====================================================================
@@ -345,6 +362,7 @@ def create_fusion_lists(
     nifti_exts: Sequence[str],
     return_ids: bool,
     anonymize_ids_flag: bool,
+    patient_group_col: str,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Match metadata rows to image files and radiomics features by cleaned ID.
@@ -381,12 +399,22 @@ def create_fusion_lists(
         s = str(raw).strip()
         return anonymize_id(s) if anonymize_ids_flag else s
 
+    def _pack_group(raw: Any) -> Optional[str]:
+        """Pack grouping key (e.g., patient_id) for GroupKFold. Always anonymized if anonymize_ids_flag is True."""
+        if raw is None or (isinstance(raw, float) and np.isnan(raw)):
+            return None
+        s = str(raw).strip()
+        if s == "":
+            return None
+        return anonymize_id(s) if anonymize_ids_flag else s
+
+
     def _process_rows(
         df_meta: pd.DataFrame,
         img_dir: Path,
         rad_df: pd.DataFrame,
         group_filter: Optional[str] = None,
-        group_col: str = "group",
+        split_col: str = "group",
     ) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         n_missing_img = 0
@@ -394,12 +422,12 @@ def create_fusion_lists(
 
         for _, row in df_meta.iterrows():
             if group_filter is not None:
-                if group_col not in df_meta.columns:
+                if split_col not in df_meta.columns:
                     raise ValueError(
-                        f"Expected column '{group_col}' for group filtering, but it was not found. "
+                        f"Expected column '{split_col}' for group filtering, but it was not found. "
                         "Refusing to proceed to prevent data leakage."
                     )
-                if str(row.get(group_col)).strip() != group_filter:
+                if str(row.get(split_col)).strip() != group_filter:
                     continue
 
             cid = clean_id(row["ID"])
@@ -422,6 +450,12 @@ def create_fusion_lists(
             sid = _pack_id(row["ID"])
             if sid is not None:
                 item["id"] = sid
+
+            # Optional grouping key for patient-level CV
+            if patient_group_col and (patient_group_col in row.index):
+                gid = _pack_group(row[patient_group_col])
+                if gid is not None:
+                    item["group_id"] = gid
 
             out.append(item)
 
@@ -532,12 +566,45 @@ def get_fusion_dataloaders(args: argparse.Namespace) -> Dict[str, DataLoader]:
         nifti_exts=args.nifti_exts,
         return_ids=bool(args.return_ids),
         anonymize_ids_flag=bool(args.anonymize_ids),
+        patient_group_col=str(getattr(args, 'group_col', 'patient_id')),
     )
 
     labels = np.array([int(it["label"].item()) for it in trainval_files], dtype=np.int64)
-    skf = StratifiedKFold(n_splits=args.n_splits, shuffle=True, random_state=args.seed)
 
-    splits = list(skf.split(np.zeros(len(labels)), labels))
+    # Optional patient-level (grouped) CV split if group_id is available
+    groups = np.array([it.get("group_id", None) for it in trainval_files], dtype=object)
+    has_groups = np.all(groups != None)
+
+    # Guardrail: grouped split requires enough unique groups
+    if has_groups:
+        uniq = len(set([g for g in groups.tolist() if g is not None]))
+        if uniq < int(args.n_splits):
+            logging.getLogger(__name__).warning(
+                "group_col='%s' present but only %d unique groups (< n_splits=%d); "
+                "falling back to StratifiedKFold (sample-level).",
+                getattr(args, "group_col", "patient_id"),
+                uniq,
+                int(args.n_splits),
+            )
+            has_groups = False
+
+    if has_groups:
+        if StratifiedGroupKFold is not None:
+            splitter = StratifiedGroupKFold(n_splits=args.n_splits, shuffle=True, random_state=args.seed)
+            splits = list(splitter.split(np.zeros(len(labels)), labels, groups))
+        else:
+            # Fallback: GroupKFold (no stratification). Still prevents patient-level leakage.
+            splitter = GroupKFold(n_splits=args.n_splits)
+            splits = list(splitter.split(np.zeros(len(labels)), labels, groups))
+        logging.getLogger(__name__).info("Using grouped CV split with group_col='%s' (patient-level isolation).", getattr(args, "group_col", "patient_id"))
+    else:
+        skf = StratifiedKFold(n_splits=args.n_splits, shuffle=True, random_state=args.seed)
+        splits = list(skf.split(np.zeros(len(labels)), labels))
+        logging.getLogger(__name__).warning(
+            "No group_id found for train/val samples; falling back to StratifiedKFold (sample-level). "
+            "To enforce patient-level isolation, add a '%s' column to internal_csv.", getattr(args, "group_col", "patient_id")
+        )
+
     if not (0 <= args.fold_idx < len(splits)):
         raise IndexError(f"fold_idx={args.fold_idx} out of range for n_splits={args.n_splits}")
 
@@ -564,6 +631,9 @@ def get_fusion_dataloaders(args: argparse.Namespace) -> Dict[str, DataLoader]:
 
     # Conservative workers helps reproducibility across platforms
     nw = max(0, min(2, int(args.num_workers)))
+
+    g = torch.Generator()
+    g.manual_seed(int(args.seed))
 
     loaders: Dict[str, DataLoader] = {
         "train": DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=nw, worker_init_fn=_seed_worker, generator=g, persistent_workers=(nw > 0)),
