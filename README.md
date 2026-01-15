@@ -12,8 +12,10 @@ This repository provides the official code for our paper on **3D CT + Radiomics 
 - **Mamba backbone**: CNN → token sequence → Mamba blocks → image embedding.
 - **Gated fusion**: radiomics baseline logits + gated residual delta logits (uncertainty-aware).
 - **Leakage-aware pipeline**:
-  - Radiomics preprocessing (median imputation + standardization) is **fit on training fold only** in `data_pipeline_fusion.py`.
-  - Feature selection supports **fold-specific** mode in `select_radiomics_features.py` to avoid CV feature-selection leakage.
+  - **Patient-level grouping (optional but recommended):** when `--group_col` (default `patient_id`) exists in `internal_group.csv`, CV is group-aware so the same patient never appears in both fold-train and fold-val.
+  - **Fold-isolated radiomics preprocessing:** median imputation + standardization are **fit on fold-train only** in `data_pipeline_fusion.py`, then applied to val/internal/external.
+  - **Leakage-safe feature selection:** `select_radiomics_features.py --mode fold` performs selection **within each fold-train** (recommended when reporting CV).
+  - **Strict test-set isolation (recommended default):** internal/external test sets are evaluated **once after training** using the best validation checkpoint; enable `--eval_tests_during_train` only for debugging.
 
 ---
 
@@ -167,12 +169,15 @@ python select_radiomics_features.py \
 ### Step 3 — Data loading (fold-isolated preprocessing)
 
 `data_pipeline_fusion.py` is called by the trainer. It performs:
-- stratified K-Fold split on internal train pool
-- median imputation + standardization **fit ONLY on fold-train**
-- MONAI transforms for 3D images
-- privacy-safe default (IDs not returned unless enabled)
+- **Group-aware** cross-validation on the internal training pool:
+  - uses `StratifiedGroupKFold` (if available) or `GroupKFold` when `--group_col` (default: `patient_id`) exists in `internal_group.csv`
+  - falls back to sample-level `StratifiedKFold` if the grouping column is missing (a warning will be printed)
+- radiomics preprocessing (median imputation + standardization) **fit ONLY on fold-train**, then applied to val/internal/external
+- MONAI transforms for 3D images (windowing + resize to fixed `roi_size`)
+- privacy-safe defaults (IDs not returned unless explicitly enabled)
 
 No separate command is required here.
+
 
 ---
 
@@ -191,17 +196,44 @@ No separate command is required here.
 
 The trainer runs 5-fold CV and reports metrics. It uses a **final locked config** for reproducibility (paper release).
 
-#### A) Quick start (using global selected features)
+#### A) Quick start (recommended, leakage-safe)
+
+This quick start assumes you will **report 5-fold cross-validation** results from the internal training pool.
+To prevent feature-selection leakage, generate **fold-specific** selected radiomics for each fold, then train with
+`--rad_root_dir` so the trainer auto-loads the matching `foldXX/` CSVs.
+
+1) **Fold-specific radiomics selection (fold01..fold05)**
+
+```bash
+for i in 0 1 2 3 4; do
+  python select_radiomics_features.py \
+    --mode fold \
+    --fold_idx $i \
+    --internal_csv ./data/internal_group.csv \
+    --radiomics_dir ./outputs/radiomics_features \
+    --out_dir ./outputs/selected_features
+done
+```
+
+2) **Train (5-fold CV) with strict test-set isolation (recommended default)**
 
 ```bash
 python train_fusion_mamba.py \
   --output_dir ./outputs/checkpoints \
-  --rad_trainval_csv ./outputs/selected_features/global/radiomics_internal_trainval_sel.csv \
-  --rad_internal_test_csv ./outputs/selected_features/global/radiomics_internal_test_sel.csv \
-  --rad_external_test_csv ./outputs/selected_features/global/radiomics_external_test_sel.csv
+  --rad_root_dir ./outputs/selected_features \
+  --internal_csv ./data/internal_group.csv \
+  --external_csv ./data/external_label.csv \
+  --group_col patient_id
 ```
 
+> Notes:
+> - `--group_col patient_id` enforces **patient-level grouping** during CV *if* the `patient_id` column exists in `internal_group.csv`.
+>   If the column is missing, the code falls back to sample-level CV and prints a warning.
+> - By default, **internal/external test sets are evaluated only once after training** (best checkpoint chosen by validation AUC).
+>   If you explicitly want the legacy behavior, set `--eval_tests_during_train` (not recommended for strict “sealed” external testing).
+
 #### B) Correct pairing for fold-mode features (important!)
+
 
 If you used Step 2 **fold mode**, training must read the matching `foldXX/` selected CSVs **for the same fold**.
 
