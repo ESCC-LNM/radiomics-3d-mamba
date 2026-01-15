@@ -194,6 +194,14 @@ def get_args() -> argparse.Namespace:
     g_train.add_argument("--warmup_epochs", type=int, default=10)
     g_train.add_argument("--early_stop", action="store_true")
     g_train.add_argument("--patience", type=int, default=25)
+
+    g_train.add_argument(
+        "--eval_tests_during_train",
+        action="store_true",
+        help="If set, evaluate internal/external test sets whenever a new best validation checkpoint is found. "
+             "Recommended to keep OFF to preserve strict test-set isolation.",
+    )
+
     g_train.add_argument(
         "--run_fold",
         type=int,
@@ -844,23 +852,25 @@ def main(args: argparse.Namespace) -> None:
                 )
                 log.info(f"  >> Saved best model: {model_save_path}")
 
-                # Evaluate internal/external using calibrated threshold
-                _, best_internal = validate(
-                    model=model,
-                    loader=dataloaders["internal_test"],
-                    criterion_val=criterion_val,
-                    device=device,
-                    threshold=float(best_threshold),
-                )
-                _, best_external = validate(
-                    model=model,
-                    loader=dataloaders["external"],
-                    criterion_val=criterion_val,
-                    device=device,
-                    threshold=float(best_threshold),
-                )
-                best_internal["Threshold"] = float(best_threshold)
-                best_external["Threshold"] = float(best_threshold)
+                # (Optional) Evaluate held-out test sets during training (NOT recommended)
+                if bool(args.eval_tests_during_train):
+                    _, best_internal = validate(
+                        model=model,
+                        loader=dataloaders["internal_test"],
+                        criterion_val=criterion_val,
+                        device=device,
+                        threshold=float(best_threshold),
+                    )
+                    _, best_external = validate(
+                        model=model,
+                        loader=dataloaders["external"],
+                        criterion_val=criterion_val,
+                        device=device,
+                        threshold=float(best_threshold),
+                    )
+                    best_internal["Threshold"] = float(best_threshold)
+                    best_external["Threshold"] = float(best_threshold)
+
 
             else:
                 no_improve_epochs += 1
@@ -872,6 +882,37 @@ def main(args: argparse.Namespace) -> None:
                     )
                     break
 
+        
+        # ---------------------------------------------------------------------
+        # Strict held-out evaluation (recommended): evaluate internal/external ONCE
+        # after training ends, using the best checkpoint chosen by validation AUC.
+        # ---------------------------------------------------------------------
+        if (best_internal is None) or (best_external is None):
+            if model_save_path.exists():
+                try:
+                    state = torch.load(model_save_path, map_location=device)
+                    model.load_state_dict(state)
+                    model.eval()
+                    _, best_internal = validate(
+                        model=model,
+                        loader=dataloaders["internal_test"],
+                        criterion_val=criterion_val,
+                        device=device,
+                        threshold=float(best_threshold),
+                    )
+                    _, best_external = validate(
+                        model=model,
+                        loader=dataloaders["external"],
+                        criterion_val=criterion_val,
+                        device=device,
+                        threshold=float(best_threshold),
+                    )
+                    best_internal["Threshold"] = float(best_threshold)
+                    best_external["Threshold"] = float(best_threshold)
+                except Exception as e:
+                    log.warning(f"  !!! WARNING: Failed strict held-out evaluation for Fold {fold_id}: {e}")
+            else:
+                log.warning(f"  !!! WARNING: Best checkpoint not found for Fold {fold_id}: {model_save_path}")
         log.info(
             f"--- Fold {fold_id} Complete | "
             f"Best Epoch: {best_epoch:03d} | Best Val AUC: {best_val_auc:.4f} ---"

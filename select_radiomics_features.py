@@ -456,7 +456,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         type=str,
         choices=["global", "fold"],
-        default="global",
+        default="fold",
         help="global: select using all internal train pool; fold: select using fold-train only (recommended for CV).",
     )
     parser.add_argument("--n_splits", type=int, default=5, help="Used when mode=fold.")
