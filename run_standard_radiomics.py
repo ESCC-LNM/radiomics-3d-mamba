@@ -53,11 +53,14 @@ def setup_logger(level: str = "INFO") -> logging.Logger:
         format="%(asctime)s | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
+        force=True,
     )
     return logging.getLogger("radiomics_extractor")
 
 
-log = setup_logger("INFO")
+log = logging.getLogger("radiomics_extractor")
+if not log.handlers:
+    log.addHandler(logging.NullHandler())
 
 
 # ---------------------------------------------------------------------
@@ -378,10 +381,16 @@ def get_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------
+def validate_args(args: argparse.Namespace) -> None:
+    if args.skip_existing and args.overwrite:
+        raise ValueError("--skip_existing and --overwrite cannot be used together.")
+
+
 def main() -> None:
     args = get_args()
     global log
     log = setup_logger(args.log_level)
+    validate_args(args)
 
     log.info("--- Starting PyRadiomics Extraction Pipeline ---")
     log.info(f"Data Root: {args.data_dir}")
