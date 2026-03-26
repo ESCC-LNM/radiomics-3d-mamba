@@ -96,9 +96,6 @@ The optional preprocessing workflow writes these files by default under:
 - `<selected_features_root>/final/internal_test_selected.csv`
 - `<selected_features_root>/final/external_test_selected.csv`
 
-## Normalisation policy
-
-The final manuscript-aligned pipeline fits median imputation and `StandardScaler` only on the pooled development cohort, then applies those fitted preprocessing parameters to the internal and external held-out cohorts without refitting.
 
 ## Public release recommendation
 
