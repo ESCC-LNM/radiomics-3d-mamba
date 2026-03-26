@@ -8,7 +8,7 @@ The final multimodal fusion pipeline expects three aligned modalities per retain
 
 ## Cohort organisation
 
-The manuscript-aligned final pipeline uses:
+The final pipeline uses:
 
 - a pooled development cohort for training
 - an internal held-out test cohort
