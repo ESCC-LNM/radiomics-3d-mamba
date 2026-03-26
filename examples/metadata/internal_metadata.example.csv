@@ -1,0 +1,5 @@
+ID,patient_id,label,group
+DEV_001,P001,1,train
+DEV_002,P002,0,train
+INT_001,P101,1,test
+INT_002,P102,0,test
