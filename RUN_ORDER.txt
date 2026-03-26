@@ -1,0 +1,36 @@
+Recommended execution order
+===========================
+
+Shared setup
+------------
+1) Fill `configs/study_config.template.json` with your local metadata paths, image and mask directories, selected radiomics CSV paths, and output directories.
+
+A. Manuscript-aligned final pipeline
+-----------------------------------
+1) Prepare internal and external metadata CSV files and the corresponding image and mask directories.
+2) Prepare the three selected radiomics CSV files referenced by `paths.final_selected_radiomics`.
+3) Run the final multimodal fusion model:
+   python -m training.train_final_multimodal_mamba_fusion --config configs/study_config.template.json
+
+Notes
+-----
+- This public release does not include standalone final CLI trainers for the radiomics-only or image-only comparator models.
+
+B. Optional preliminary 5-fold tuning utilities
+----------------------------------------------
+1) Freeze patient-level cohort roles and outer folds:
+   python -m preprocessing.generate_patient_split_manifest --config configs/study_config.template.json
+2) Extract radiomics features without label-dependent filtering:
+   python -m preprocessing.extract_radiomics_features --config configs/study_config.template.json
+3) Perform supervised radiomics feature selection:
+   python -m preprocessing.select_supervised_radiomics_features --config configs/study_config.template.json
+4) Run development-stage outer cross-validation for hyperparameter or epoch selection only:
+   python -m training.train_preliminary_multimodal_mamba_fusion --config configs/study_config.template.json
+5) Lock the selected hyperparameters or epoch count externally, then retrain with the final manuscript-aligned script from section A.
+
+Key rules
+---------
+- The final manuscript-reported performance must come from `training/train_final_multimodal_mamba_fusion.py` and the held-out cohorts.
+- Optional 5-fold cross-validation is for preliminary tuning only and must not be reported as final held-out performance.
+- The final fusion pipeline uses dual-channel image input: CT plus binary mask.
+- The final fusion pipeline uses a fixed decision threshold of `0.5`.
