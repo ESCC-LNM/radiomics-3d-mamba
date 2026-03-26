@@ -1,0 +1,29 @@
+Recommended execution order
+===========================
+
+A. Manuscript-aligned final pipeline
+-----------------------------------
+1) Prepare internal/external metadata CSV files and image/mask directories.
+2) Prepare the selected radiomics CSV files.
+3) Run the final fusion model:
+   python train_final_mamba.py
+4) Run baseline models as needed for comparative analysis.
+
+B. Optional preliminary 5-fold tuning utilities
+----------------------------------------------
+1) Freeze patient-level cohort roles and outer folds:
+   python make_split_manifest.py --config configs/manuscript_locked_template.json
+2) Extract radiomics features without label-dependent filtering:
+   python run_standard_radiomics.py --config configs/manuscript_locked_template.json
+3) Perform supervised radiomics feature selection:
+   python select_radiomics_features.py --config configs/manuscript_locked_template.json
+4) Run development-stage outer cross-validation for hyperparameter/epoch selection only:
+   python train_fusion_mamba.py --config configs/manuscript_locked_template.json
+5) Lock the selected hyperparameters/epoch count and retrain using the final manuscript-aligned scripts.
+
+Key rules
+---------
+- The final manuscript-reported performance must come from the fixed final scripts and held-out cohorts.
+- Optional 5-fold cross-validation is for preliminary tuning only and must not be reported as final held-out performance.
+- The final fusion pipeline uses dual-channel image input: CT plus binary mask.
+- The final fusion pipeline uses a fixed decision threshold of 0.5.
