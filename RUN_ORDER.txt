@@ -33,4 +33,3 @@ Key rules
 - The final manuscript-reported performance must come from `training/train_final_multimodal_mamba_fusion.py` and the held-out cohorts.
 - Optional 5-fold cross-validation is for preliminary tuning only and must not be reported as final held-out performance.
 - The final fusion pipeline uses dual-channel image input: CT plus binary mask.
-- The final fusion pipeline uses a fixed decision threshold of `0.5`.
