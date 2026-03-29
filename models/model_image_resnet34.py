@@ -1,11 +1,5 @@
 """
-Compact 3D ResNet image baseline for fair comparison with 3D_Mamba.
-
-This variant keeps the public API unchanged but reduces capacity:
-- narrower stem/stages (base width 32 instead of 64)
-- shallower stage layout (2, 2, 2, 2)
-- GroupNorm in place of BatchNorm for small-batch stability
-- dropout before the classifier head
+ 3D ResNet 
 """
 
 from __future__ import annotations
