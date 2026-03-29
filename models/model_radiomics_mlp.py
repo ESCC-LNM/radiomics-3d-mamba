@@ -1,8 +1,5 @@
 """
-Radiomics-only comparator architecture.
-
-This module defines the MLP used for the radiomics-only baseline, but it does
-not provide a standalone manuscript-locked training CLI in this public release.
+Radiomics-only 
 """
 
 import torch
