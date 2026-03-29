@@ -1,15 +1,5 @@
 """
 Leakage-controlled radiomics feature selection.
-
-Inputs:
-  - frozen master cohort manifest
-  - frozen cross-validation manifest
-  - raw radiomics tables for development, internal held-out, and external held-out cohorts
-
-Outputs:
-  - fold-specific radiomics tables for model selection (train/val only)
-  - final radiomics tables for full-development training and held-out evaluation
-  - selector metadata for each fold and for the final selector
 """
 
 from __future__ import annotations
