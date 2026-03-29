@@ -1,14 +1,5 @@
 """
 Swin Fusion Model (3D CT + Radiomics)
-
-Fair-comparison design against Radiomics_3D_Mamba:
-1. Keep the same fusion head/protocol (learnable convex gate).
-2. Keep the same trainer I/O contract.
-3. Only change image encoder: Swin instead of Mamba encoder.
-
-Compatibility with trainer:
-- train(): returns dict {"fusion", "rad", optional "img"}
-- eval(): returns tuple (fusion_logits, u, gate), where gate=alpha, u=1-alpha
 """
 
 from __future__ import annotations
