@@ -1,18 +1,5 @@
 """
-Manuscript-aligned multimodal fusion model.
-
-Final fusion rule:
-    fusion = (1 - alpha) * logits_rad + alpha * logits_img
-
-where alpha in [0, 1] is a sample-wise scalar gate estimated from the
-concatenated radiomics and image features.
-
-Compatibility notes
--------------------
-- Final training scripts use the keys: ``fusion``, ``img``, ``rad``.
-- Optional preliminary CV utilities use the keys:
-  ``fusion_logits``, ``image_logits``, ``radiomics_logits``.
-- This module exposes both naming conventions to keep the repository coherent.
+multimodal fusion model.
 """
 
 from __future__ import annotations
