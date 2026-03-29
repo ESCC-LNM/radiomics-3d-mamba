@@ -1,9 +1,6 @@
 """
 Create a frozen cohort manifest and a patient-level cross-validation manifest.
 
-This script must be run before supervised radiomics feature selection or model
-training. It is the single authoritative source of cohort roles and outer-fold
-assignments.
 """
 
 from __future__ import annotations
