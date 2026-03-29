@@ -1,10 +1,5 @@
 """
-Compact Swin image baseline for fair comparison with 3D_Mamba.
-
-The public API is unchanged, but the model is made lighter by:
-- requesting a shallower SwinUNETR encoder when the MONAI version supports it
-- projecting pooled encoder features to a smaller embedding before classification
-- applying extra dropout in the classification head
+Swin image baseline 
 """
 
 from __future__ import annotations
