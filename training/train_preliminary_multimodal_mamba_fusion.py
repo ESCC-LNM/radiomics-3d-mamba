@@ -1,11 +1,3 @@
-"""
-Optional preliminary 5-fold development-stage tuning for the radiomics-3D Mamba fusion model.
-
-This script is intentionally separated from the final manuscript-reported held-out
-analysis. It operates only within the development cohort and is intended for
-preliminary hyperparameter / epoch selection before final fixed-protocol retraining.
-"""
-
 from __future__ import annotations
 
 import argparse
