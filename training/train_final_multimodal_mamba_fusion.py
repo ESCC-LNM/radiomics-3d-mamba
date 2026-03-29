@@ -1,11 +1,3 @@
-"""
-Final manuscript-aligned training and held-out evaluation script.
-
-This is the public end-to-end trainer for the multimodal radiomics-3D Mamba
-fusion model. Comparator architectures are released separately as model
-definitions and are not invoked here.
-"""
-
 from __future__ import annotations
 
 import argparse
