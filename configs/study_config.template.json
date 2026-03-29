@@ -123,8 +123,8 @@
     },
     "auxiliary_loss": {
       "enable": true,
-      "image_weight": 0.25,
-      "radiomics_weight": 0.0
+      "image_weight": 0.1,
+      "radiomics_weight": 0.05
     },
     "fixed_threshold": 0.5
   }
