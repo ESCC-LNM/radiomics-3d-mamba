@@ -1,8 +1,5 @@
 """
 Configuration-driven radiomics extraction script.
-
-This script performs feature extraction only. It does not perform any
-label-dependent filtering, normalisation, or supervised feature selection.
 """
 
 from __future__ import annotations
