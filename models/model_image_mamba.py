@@ -1,15 +1,5 @@
 """
-Mamba-CT (3D CT-only) baseline model - publication-safe aligned version
-
-What this fixes / guarantees for Academic Peer-Review:
-------------------------------------------------------
-1) 100% Architectural Alignment: The 3D CNN stem (BatchNorm, ReLU, channel dims),
-   the dual Mamba blocks, the pooling strategy, and the MLP head are EXACT replicas
-   of the CT branch in `Mamba_Fusion_Model`.
-2) Controlling Variables: Any performance difference between this model and the
-   fusion model can now be mathematically attributed ONLY to the radiomics fusion
-   mechanism, satisfying strict reviewer scrutiny.
-3) Fast-fail CUDA enforcement is maintained to match the main training pipeline.
+Mamba-CT (3D CT-only) baseline model 
 """
 
 import logging
