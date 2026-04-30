@@ -1,6 +1,4 @@
 """
-Final manuscript-aligned data pipeline for multimodal fusion.
-
 This module builds the pooled development training loader plus held-out internal,
 external_test1, and external_test2 evaluation loaders. It is configuration-driven and does not ship
 with site-specific filesystem defaults.
