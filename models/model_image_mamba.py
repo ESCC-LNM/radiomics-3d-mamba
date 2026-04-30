@@ -81,7 +81,7 @@ class MambaCTFeatureExtractor(nn.Module):
 
 
 # =============================================================================
-# Mamba_CT (100% ALIGNED with Script 1, wrapped as standalone classifier)
+# Mamba_CT 
 # =============================================================================
 class Mamba_CT_Baseline(nn.Module):
     def __init__(
