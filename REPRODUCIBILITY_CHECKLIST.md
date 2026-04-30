@@ -6,7 +6,7 @@
 - [ ] Confirm that held-out internal and external cohorts were not used during optional hyperparameter tuning.
 - [ ] Confirm that public scripts no longer contain hard-coded local filesystem defaults.
 - [ ] Fill a private copy of `configs/study_config.template.json` with local paths and archive that filled config alongside the exact command lines used for the reported run.
-- [ ] Verify that the three final selected radiomics CSV files contain the intended feature set and cohort rows.
+- [ ] Verify that the four final selected radiomics CSV files contain the intended feature set and cohort rows.
 - [ ] Verify that the final fixed decision threshold is `0.5` in both manuscript and code.
 - [ ] Record the Python, PyTorch, MONAI, scikit-learn, PyRadiomics, and `mamba-ssm` versions used for the reported results.
 - [ ] Archive the exact repository snapshot used for submission or revision.

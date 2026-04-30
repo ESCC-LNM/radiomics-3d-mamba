@@ -25,6 +25,9 @@ from utils.analysis_utils import (
 )
 
 
+EXTERNAL_TEST_SPLITS = ("external_test1", "external_test2")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Freeze cohort roles and patient-level outer folds for the multimodal fusion study.",
@@ -56,11 +59,11 @@ def _read_internal_metadata(cfg: Mapping[str, Any]) -> pd.DataFrame:
     return df
 
 
-def _read_external_metadata(cfg: Mapping[str, Any]) -> pd.DataFrame:
+def _read_external_metadata(cfg: Mapping[str, Any], split_name: str) -> pd.DataFrame:
     sample_id_col = str(get_required(cfg, "columns.sample_id"))
     label_col = str(get_required(cfg, "columns.label"))
     patient_id_col = str(get_required(cfg, "columns.external_patient_id")) if "external_patient_id" in get_required(cfg, "columns") else None
-    metadata_path = Path(get_required(cfg, "paths.external_metadata_csv"))
+    metadata_path = Path(get_required(cfg, f"paths.{split_name}_metadata_csv"))
 
     dtypes = {sample_id_col: str}
     if patient_id_col is not None:
@@ -123,17 +126,21 @@ def main() -> None:
 
     development_group_value = str(get_required(cfg, "dataset_roles.development_group_value"))
     internal_test_group_value = str(get_required(cfg, "dataset_roles.internal_test_group_value"))
-    external_test_role_name = str(get_required(cfg, "dataset_roles.external_test_role_name"))
+    external_role_names = {
+        split_name: str(get_required(cfg, f"dataset_roles.{split_name}_role_name"))
+        for split_name in EXTERNAL_TEST_SPLITS
+    }
 
     internal_metadata = _read_internal_metadata(cfg)
-    external_metadata = _read_external_metadata(cfg)
+    external_metadata = {split_name: _read_external_metadata(cfg, split_name) for split_name in EXTERNAL_TEST_SPLITS}
 
     if internal_metadata[sample_id_col].duplicated().any():
         dup = internal_metadata.loc[internal_metadata[sample_id_col].duplicated(), sample_id_col].tolist()[:10]
         raise ValueError(f"Duplicate internal sample identifiers were detected. Examples: {dup}")
-    if external_metadata[sample_id_col].duplicated().any():
-        dup = external_metadata.loc[external_metadata[sample_id_col].duplicated(), sample_id_col].tolist()[:10]
-        raise ValueError(f"Duplicate external sample identifiers were detected. Examples: {dup}")
+    for split_name, rows in external_metadata.items():
+        if rows[sample_id_col].duplicated().any():
+            dup = rows.loc[rows[sample_id_col].duplicated(), sample_id_col].tolist()[:10]
+            raise ValueError(f"Duplicate {split_name} sample identifiers were detected. Examples: {dup}")
 
     development_df = internal_metadata.loc[internal_metadata[group_col].astype(str) == development_group_value].copy()
     internal_test_df = internal_metadata.loc[internal_metadata[group_col].astype(str) == internal_test_group_value].copy()
@@ -144,6 +151,8 @@ def main() -> None:
 
     _validate_patient_consistency(development_df, patient_id_col, label_col, role_name="development")
     _validate_patient_consistency(internal_test_df, patient_id_col, label_col, role_name="internal held-out")
+    for split_name, rows in external_metadata.items():
+        _validate_patient_consistency(rows, "_external_patient_id", label_col, role_name=split_name)
 
     overlap = set(development_df[patient_id_col].astype(str)) & set(internal_test_df[patient_id_col].astype(str))
     if overlap:
@@ -167,13 +176,18 @@ def main() -> None:
     internal_manifest["outer_fold"] = pd.NA
     internal_manifest["fold_role"] = "heldout"
 
-    external_manifest = external_metadata[[sample_id_col, "_external_patient_id", label_col]].copy()
-    external_manifest = external_manifest.rename(columns={"_external_patient_id": patient_id_col})
-    external_manifest["cohort_role"] = external_test_role_name
-    external_manifest["outer_fold"] = pd.NA
-    external_manifest["fold_role"] = "heldout"
+    external_manifests = []
+    for split_name, rows in external_metadata.items():
+        if rows.empty:
+            raise ValueError(f"No {split_name} samples were found in the configured metadata file.")
+        external_manifest = rows[[sample_id_col, "_external_patient_id", label_col]].copy()
+        external_manifest = external_manifest.rename(columns={"_external_patient_id": patient_id_col})
+        external_manifest["cohort_role"] = external_role_names[split_name]
+        external_manifest["outer_fold"] = pd.NA
+        external_manifest["fold_role"] = "heldout"
+        external_manifests.append(external_manifest)
 
-    master_manifest = pd.concat([development_manifest, internal_manifest, external_manifest], axis=0, ignore_index=True)
+    master_manifest = pd.concat([development_manifest, internal_manifest, *external_manifests], axis=0, ignore_index=True)
     master_manifest = master_manifest.rename(
         columns={sample_id_col: "sample_id", patient_id_col: "patient_id", label_col: "label"}
     )
@@ -209,10 +223,16 @@ def main() -> None:
         {
             "n_development_samples": int((master_manifest["cohort_role"] == "development").sum()),
             "n_internal_test_samples": int((master_manifest["cohort_role"] == "internal_test").sum()),
-            "n_external_test_samples": int((master_manifest["cohort_role"] == external_test_role_name).sum()),
             "n_development_patients": int(master_manifest.loc[master_manifest["cohort_role"] == "development", "patient_id"].nunique()),
             "n_internal_test_patients": int(master_manifest.loc[master_manifest["cohort_role"] == "internal_test", "patient_id"].nunique()),
-            "n_external_test_patients": int(master_manifest.loc[master_manifest["cohort_role"] == external_test_role_name, "patient_id"].nunique()),
+            **{
+                f"n_{split_name}_samples": int((master_manifest["cohort_role"] == role_name).sum())
+                for split_name, role_name in external_role_names.items()
+            },
+            **{
+                f"n_{split_name}_patients": int(master_manifest.loc[master_manifest["cohort_role"] == role_name, "patient_id"].nunique())
+                for split_name, role_name in external_role_names.items()
+            },
             "n_splits": int(n_splits),
             "seed": int(seed),
         },

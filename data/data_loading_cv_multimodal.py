@@ -54,7 +54,7 @@ def _read_manifest(path: Path) -> pd.DataFrame:
     return df
 
 
-def _read_selected_table(path: Path) -> pd.DataFrame:
+def _read_selected_table(path: Path, excluded_columns: List[str]) -> pd.DataFrame:
     df = pd.read_csv(path)
     if "ID" not in df.columns:
         first_col = df.columns[0]
@@ -63,11 +63,12 @@ def _read_selected_table(path: Path) -> pd.DataFrame:
     if df["ID"].duplicated().any():
         dup = df.loc[df["ID"].duplicated(), "ID"].tolist()[:10]
         raise ValueError(f"Duplicate radiomics sample identifiers detected in {path.name}. Examples: {dup}")
-    feature_cols = [c for c in df.columns if c != "ID"]
+    excluded = {str(col) for col in excluded_columns if col is not None}
+    feature_cols = [c for c in df.columns if c != "ID" and c not in excluded]
     if not feature_cols:
         raise ValueError(f"No selected radiomics feature columns found in {path.name}")
     df[feature_cols] = df[feature_cols].apply(pd.to_numeric, errors="coerce")
-    return df.set_index("ID")
+    return df.loc[:, ["ID", *feature_cols]].set_index("ID")
 
 
 def _resolve_mask_path(mask_dir: Path, sample_id: str, allowed_suffixes: List[str]) -> Path:
@@ -190,8 +191,20 @@ def build_cv_dataloaders(cfg: Mapping[str, Any], outer_fold: int) -> Tuple[Dict[
         raise ValueError(f"Outer fold {outer_fold} does not contain both train and val rows.")
 
     selected_root = Path(get_required(cfg, "paths.selected_features_root")) / "folds" / f"fold_{int(outer_fold):02d}"
-    train_table = _read_selected_table(selected_root / "train_selected.csv")
-    val_table = _read_selected_table(selected_root / "val_selected.csv")
+    excluded_feature_columns = [
+        str(get_required(cfg, "columns.label")),
+        str(get_required(cfg, "columns.patient_id")),
+        str(get_required(cfg, "columns.group")),
+        str(get_optional(cfg, "columns.external_patient_id", default="")),
+        "label",
+        "patient_id",
+        "group",
+        "cohort_role",
+        "fold_role",
+        "outer_fold",
+    ]
+    train_table = _read_selected_table(selected_root / "train_selected.csv", excluded_feature_columns)
+    val_table = _read_selected_table(selected_root / "val_selected.csv", excluded_feature_columns)
 
     train_sample_ids = train_rows["sample_id"].astype(str).tolist()
     val_sample_ids = val_rows["sample_id"].astype(str).tolist()

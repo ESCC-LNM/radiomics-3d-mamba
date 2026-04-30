@@ -12,7 +12,8 @@ The final pipeline uses:
 
 - a pooled development cohort for training
 - an internal held-out test cohort
-- an external held-out test cohort
+- a first external held-out test cohort
+- a second external held-out test cohort
 
 If the optional preliminary cross-validation workflow is used, only the development cohort enters 5-fold cross-validation. Internal and external held-out cohorts must remain untouched during that stage.
 
@@ -36,9 +37,9 @@ The default template maps these semantics to the following public column names:
 - `label -> label`
 - `group -> group`
 
-### External metadata CSV
+### External metadata CSVs
 
-The external metadata CSV must provide at least:
+Each external metadata CSV must provide at least:
 
 - `sample_id`
 - `label`
@@ -47,7 +48,8 @@ The external metadata CSV must provide at least:
 The public example files are:
 
 - `examples/metadata/internal_metadata.example.csv`
-- `examples/metadata/external_metadata.example.csv`
+- `examples/metadata/external_test1_metadata.example.csv`
+- `examples/metadata/external_test2_metadata.example.csv`
 
 ## Imaging files
 
@@ -55,10 +57,12 @@ Provide separate local directories for:
 
 - development CT crops
 - internal held-out CT crops
-- external held-out CT crops
+- external_test1 held-out CT crops
+- external_test2 held-out CT crops
 - development masks
 - internal held-out masks
-- external held-out masks
+- external_test1 held-out masks
+- external_test2 held-out masks
 
 Sample identifiers are resolved from file names after removing suffixes such as `.nii.gz`, `.nii`, or `.nii(1).gz`.
 
@@ -73,28 +77,33 @@ Samples missing any required element are skipped, and the final data-pipeline lo
 
 ## Radiomics tables
 
-The manuscript-aligned final script `training/train_final_multimodal_mamba_fusion.py` expects three selected radiomics CSV tables:
+The manuscript-aligned final script `training/train_final_multimodal_mamba_fusion.py` expects four selected radiomics CSV tables:
 
 - development selected table
 - internal test selected table
-- external test selected table
+- external_test1 selected table
+- external_test2 selected table
 
 The default config keys are:
 
 - `paths.final_selected_radiomics.development_csv`
 - `paths.final_selected_radiomics.internal_test_csv`
-- `paths.final_selected_radiomics.external_test_csv`
+- `paths.final_selected_radiomics.external_test1_csv`
+- `paths.final_selected_radiomics.external_test2_csv`
 
 Each selected table must contain:
 
 - an identifier column named `ID`, or an equivalent first column that can be renamed to `ID`
 - the same selected radiomics feature columns in the same semantic feature space
 
+Identifier, label, cohort, fold, and patient columns are not valid model features. The public loading scripts ignore the common names for these columns, but release CSVs should omit them to keep the feature tables unambiguous.
+
 The optional preprocessing workflow writes these files by default under:
 
 - `<selected_features_root>/final/development_selected.csv`
 - `<selected_features_root>/final/internal_test_selected.csv`
-- `<selected_features_root>/final/external_test_selected.csv`
+- `<selected_features_root>/final/external_test1_selected.csv`
+- `<selected_features_root>/final/external_test2_selected.csv`
 
 
 ## Public release recommendation

@@ -7,8 +7,8 @@ Shared setup
 
 A. Manuscript-aligned final pipeline
 -----------------------------------
-1) Prepare internal and external metadata CSV files and the corresponding image and mask directories.
-2) Prepare the three selected radiomics CSV files referenced by `paths.final_selected_radiomics`.
+1) Prepare internal, external_test1, and external_test2 metadata CSV files and the corresponding image and mask directories.
+2) Prepare the four selected radiomics CSV files referenced by `paths.final_selected_radiomics`.
 3) Run the final multimodal fusion model:
    python -m training.train_final_multimodal_mamba_fusion --config configs/study_config.template.json
 

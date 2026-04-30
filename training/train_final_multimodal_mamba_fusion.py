@@ -230,12 +230,13 @@ def main() -> None:
     ce_loss = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=label_smoothing)
 
     logger.info(
-        "Starting final training | epochs=%d threshold=%.3f train_n=%d internal_n=%d external_n=%d",
+        "Starting final training | epochs=%d threshold=%.3f train_n=%d internal_n=%d external1_n=%d external2_n=%d",
         max_epochs,
         threshold,
         data_meta["development_n"],
         data_meta["internal_test_n"],
-        data_meta["external_test_n"],
+        data_meta["external_test1_n"],
+        data_meta["external_test2_n"],
     )
 
     epoch_rows: List[Dict[str, Any]] = []
@@ -257,12 +258,12 @@ def main() -> None:
     for split_name, loader_key in [
         ("development", "train"),
         ("internal_test", "internal_test"),
-        ("external_test", "external_test"),
+        ("external_test1", "external_test1"),
+        ("external_test2", "external_test2"),
     ]:
         loader = loaders[loader_key]
         if len(loader.dataset) == 0:
-            logger.warning("Skipping empty split: %s", split_name)
-            continue
+            raise RuntimeError(f"Evaluation split '{split_name}' is empty.")
         metrics, pred_df = evaluate_split(
             model,
             loader,

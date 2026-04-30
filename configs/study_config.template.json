@@ -1,7 +1,8 @@
 {
   "paths": {
     "internal_metadata_csv": "/path/to/internal_metadata.csv",
-    "external_metadata_csv": "/path/to/external_metadata.csv",
+    "external_test1_metadata_csv": "/path/to/external_test1_metadata.csv",
+    "external_test2_metadata_csv": "/path/to/external_test2_metadata.csv",
     "preprocessed_root": "/path/to/preprocessed_outputs",
     "radiomics_output_root": "/path/to/preprocessed_outputs/radiomics_raw",
     "selected_features_root": "/path/to/preprocessed_outputs/radiomics_selected",
@@ -10,22 +11,26 @@
     "images": {
       "development_dir": "/path/to/development/images",
       "internal_test_dir": "/path/to/internal_test/images",
-      "external_test_dir": "/path/to/external_test/images"
+      "external_test1_dir": "/path/to/external_test1/images",
+      "external_test2_dir": "/path/to/external_test2/images"
     },
     "masks": {
       "development_dir": "/path/to/development/masks",
       "internal_test_dir": "/path/to/internal_test/masks",
-      "external_test_dir": "/path/to/external_test/masks"
+      "external_test1_dir": "/path/to/external_test1/masks",
+      "external_test2_dir": "/path/to/external_test2/masks"
     },
     "radiomics": {
       "development_raw_csv": "/path/to/preprocessed_outputs/radiomics_raw/development_raw.csv",
       "internal_test_raw_csv": "/path/to/preprocessed_outputs/radiomics_raw/internal_test_raw.csv",
-      "external_test_raw_csv": "/path/to/preprocessed_outputs/radiomics_raw/external_test_raw.csv"
+      "external_test1_raw_csv": "/path/to/preprocessed_outputs/radiomics_raw/external_test1_raw.csv",
+      "external_test2_raw_csv": "/path/to/preprocessed_outputs/radiomics_raw/external_test2_raw.csv"
     },
     "final_selected_radiomics": {
       "development_csv": "/path/to/preprocessed_outputs/radiomics_selected/final/development_selected.csv",
       "internal_test_csv": "/path/to/preprocessed_outputs/radiomics_selected/final/internal_test_selected.csv",
-      "external_test_csv": "/path/to/preprocessed_outputs/radiomics_selected/final/external_test_selected.csv"
+      "external_test1_csv": "/path/to/preprocessed_outputs/radiomics_selected/final/external_test1_selected.csv",
+      "external_test2_csv": "/path/to/preprocessed_outputs/radiomics_selected/final/external_test2_selected.csv"
     }
   },
   "columns": {
@@ -38,7 +43,8 @@
   "dataset_roles": {
     "development_group_value": "train",
     "internal_test_group_value": "test",
-    "external_test_role_name": "external_test"
+    "external_test1_role_name": "external_test1",
+    "external_test2_role_name": "external_test2"
   },
   "dataset": {
     "allowed_image_suffixes": [

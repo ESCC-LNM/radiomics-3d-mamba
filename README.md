@@ -38,7 +38,6 @@ This public release includes:
 
 Key documents:
 
-- `MANUSCRIPT_ALIGNMENT.md`
 - `REPRODUCIBILITY_CHECKLIST.md`
 - `README_DATA.md`
 - `RUN_ORDER.txt`

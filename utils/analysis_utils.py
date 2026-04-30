@@ -55,7 +55,7 @@ def configure_logging(log_path: Optional[Path] = None, level: int = logging.INFO
 
 
 def load_json(path: str | Path) -> Dict[str, Any]:
-    with Path(path).open("r", encoding="utf-8") as f:
+    with Path(path).open("r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 

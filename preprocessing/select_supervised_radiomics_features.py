@@ -16,6 +16,7 @@ from sklearn.metrics import roc_auc_score
 from utils.analysis_utils import (
     configure_logging,
     ensure_dir,
+    get_optional,
     get_required,
     load_json,
     normalize_sample_id,
@@ -23,6 +24,9 @@ from utils.analysis_utils import (
     save_feature_list,
     save_json,
 )
+
+
+EXTERNAL_TEST_SPLITS = ("external_test1", "external_test2")
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _read_radiomics(path: Path) -> pd.DataFrame:
+def _read_radiomics(path: Path, excluded_columns: Sequence[str] = ()) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Radiomics CSV not found: {path}")
     df = pd.read_csv(path)
@@ -51,7 +55,9 @@ def _read_radiomics(path: Path) -> pd.DataFrame:
     if df["ID"].duplicated().any():
         dup = df.loc[df["ID"].duplicated(), "ID"].tolist()[:10]
         raise ValueError(f"Duplicate radiomics sample identifiers were detected in {path.name}. Examples: {dup}")
-    df = df.set_index("ID")
+    excluded = {str(col) for col in excluded_columns if col is not None}
+    feature_columns = [col for col in df.columns if col != "ID" and col not in excluded]
+    df = df.loc[:, ["ID", *feature_columns]].set_index("ID")
     df = df.apply(pd.to_numeric, errors="coerce")
     if df.shape[1] == 0:
         raise ValueError(f"No numeric radiomics features were found in {path.name}")
@@ -173,9 +179,28 @@ def main() -> None:
     master_manifest = _read_master_manifest(Path(get_required(cfg, "paths.preprocessed_root")) / "master_cohort_manifest.csv")
     cv_manifest = _read_cv_manifest(Path(get_required(cfg, "paths.preprocessed_root")) / "cv_split_manifest.csv")
 
-    development_raw = _read_radiomics(Path(get_required(cfg, "paths.radiomics.development_raw_csv")))
-    internal_test_raw = _read_radiomics(Path(get_required(cfg, "paths.radiomics.internal_test_raw_csv")))
-    external_test_raw = _read_radiomics(Path(get_required(cfg, "paths.radiomics.external_test_raw_csv")))
+    excluded_feature_columns = {
+        str(get_required(cfg, "columns.label")),
+        str(get_required(cfg, "columns.patient_id")),
+        str(get_required(cfg, "columns.group")),
+        str(get_optional(cfg, "columns.external_patient_id", default="")),
+        "label",
+        "patient_id",
+        "group",
+        "cohort_role",
+        "fold_role",
+        "outer_fold",
+    }
+
+    development_raw = _read_radiomics(Path(get_required(cfg, "paths.radiomics.development_raw_csv")), excluded_feature_columns)
+    internal_test_raw = _read_radiomics(Path(get_required(cfg, "paths.radiomics.internal_test_raw_csv")), excluded_feature_columns)
+    external_test_raw = {
+        split_name: _read_radiomics(
+            Path(get_required(cfg, f"paths.radiomics.{split_name}_raw_csv")),
+            excluded_feature_columns,
+        )
+        for split_name in EXTERNAL_TEST_SPLITS
+    }
 
     top_k = int(get_required(cfg, "feature_selection.top_k"))
     min_auc = float(get_required(cfg, "feature_selection.min_auc"))
@@ -187,8 +212,12 @@ def main() -> None:
 
     development_master = master_manifest.loc[master_manifest["cohort_role"] == "development"].copy()
     internal_test_master = master_manifest.loc[master_manifest["cohort_role"] == "internal_test"].copy()
-    external_role_name = str(get_required(cfg, "dataset_roles.external_test_role_name"))
-    external_test_master = master_manifest.loc[master_manifest["cohort_role"] == external_role_name].copy()
+    external_test_master = {
+        split_name: master_manifest.loc[
+            master_manifest["cohort_role"] == str(get_required(cfg, f"dataset_roles.{split_name}_role_name"))
+        ].copy()
+        for split_name in EXTERNAL_TEST_SPLITS
+    }
 
     # Cross-validation feature selection: train only, applied to train/val within the same outer fold.
     fold_selector_rows: List[Dict[str, Any]] = []
@@ -247,11 +276,18 @@ def main() -> None:
 
     final_development_selected = _build_selected_table(X_dev_raw, final_selected_features)
     final_internal_selected = _build_selected_table(_align_feature_table(internal_test_raw, internal_test_master), final_selected_features)
-    final_external_selected = _build_selected_table(_align_feature_table(external_test_raw, external_test_master), final_selected_features)
+    final_external_selected = {
+        split_name: _build_selected_table(
+            _align_feature_table(external_test_raw[split_name], external_test_master[split_name]),
+            final_selected_features,
+        )
+        for split_name in EXTERNAL_TEST_SPLITS
+    }
 
     final_development_selected.to_csv(final_dir / "development_selected.csv", index=False)
     final_internal_selected.to_csv(final_dir / "internal_test_selected.csv", index=False)
-    final_external_selected.to_csv(final_dir / "external_test_selected.csv", index=False)
+    for split_name, table in final_external_selected.items():
+        table.to_csv(final_dir / f"{split_name}_selected.csv", index=False)
     save_feature_list(final_selected_features, final_dir / "selected_features.txt")
     save_json(
         {

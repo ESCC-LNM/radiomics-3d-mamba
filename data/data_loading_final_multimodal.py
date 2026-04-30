@@ -1,8 +1,8 @@
 """
 Final manuscript-aligned data pipeline for multimodal fusion.
 
-This module builds the pooled development training loader plus held-out internal
-and external evaluation loaders. It is configuration-driven and does not ship
+This module builds the pooled development training loader plus held-out internal,
+external_test1, and external_test2 evaluation loaders. It is configuration-driven and does not ship
 with site-specific filesystem defaults.
 """
 
@@ -44,6 +44,8 @@ from utils.analysis_utils import (
 )
 
 log = logging.getLogger("fusion_journal_pipeline")
+EXTERNAL_TEST_SPLITS = ("external_test1", "external_test2")
+EVALUATION_SPLITS = ("internal_test", "external_test1", "external_test2")
 
 
 def parse_args() -> argparse.Namespace:
@@ -72,11 +74,11 @@ def _read_internal_metadata(cfg: Mapping[str, Any]) -> pd.DataFrame:
     return df
 
 
-def _read_external_metadata(cfg: Mapping[str, Any]) -> pd.DataFrame:
+def _read_external_metadata(cfg: Mapping[str, Any], split_name: str) -> pd.DataFrame:
     sample_id_col = str(get_required(cfg, "columns.sample_id"))
     label_col = str(get_required(cfg, "columns.label"))
     external_patient_id_col = get_optional(cfg, "columns.external_patient_id", default=None)
-    path = Path(get_required(cfg, "paths.external_metadata_csv"))
+    path = Path(get_required(cfg, f"paths.{split_name}_metadata_csv"))
     dtypes = {sample_id_col: str}
     if external_patient_id_col is not None:
         dtypes[str(external_patient_id_col)] = str
@@ -93,7 +95,7 @@ def _read_external_metadata(cfg: Mapping[str, Any]) -> pd.DataFrame:
     return df
 
 
-def _read_selected_table(path: Path) -> pd.DataFrame:
+def _read_selected_table(path: Path, excluded_columns: List[str]) -> pd.DataFrame:
     df = pd.read_csv(path)
     if "ID" not in df.columns:
         first_col = df.columns[0]
@@ -102,28 +104,31 @@ def _read_selected_table(path: Path) -> pd.DataFrame:
     if df["ID"].duplicated().any():
         dup = df.loc[df["ID"].duplicated(), "ID"].tolist()[:10]
         raise ValueError(f"Duplicate radiomics sample identifiers detected in {path.name}. Examples: {dup}")
-    feature_cols = [c for c in df.columns if c != "ID"]
+    excluded = {str(col) for col in excluded_columns if col is not None}
+    feature_cols = [c for c in df.columns if c != "ID" and c not in excluded]
     if not feature_cols:
         raise ValueError(f"No selected radiomics feature columns found in {path.name}")
     df[feature_cols] = df[feature_cols].apply(pd.to_numeric, errors="coerce")
-    return df.set_index("ID")
+    return df.loc[:, ["ID", *feature_cols]].set_index("ID")
 
 
-def _resolve_final_selected_paths(cfg: Mapping[str, Any]) -> Tuple[Path, Path, Path]:
+def _resolve_final_selected_paths(cfg: Mapping[str, Any]) -> Dict[str, Path]:
     final_cfg = get_optional(cfg, "paths.final_selected_radiomics", default=None)
     if final_cfg:
-        return (
-            Path(get_required(cfg, "paths.final_selected_radiomics.development_csv")),
-            Path(get_required(cfg, "paths.final_selected_radiomics.internal_test_csv")),
-            Path(get_required(cfg, "paths.final_selected_radiomics.external_test_csv")),
-        )
+        return {
+            "development": Path(get_required(cfg, "paths.final_selected_radiomics.development_csv")),
+            "internal_test": Path(get_required(cfg, "paths.final_selected_radiomics.internal_test_csv")),
+            "external_test1": Path(get_required(cfg, "paths.final_selected_radiomics.external_test1_csv")),
+            "external_test2": Path(get_required(cfg, "paths.final_selected_radiomics.external_test2_csv")),
+        }
 
     final_root = Path(get_required(cfg, "paths.selected_features_root")) / "final"
-    return (
-        final_root / "development_selected.csv",
-        final_root / "internal_test_selected.csv",
-        final_root / "external_test_selected.csv",
-    )
+    return {
+        "development": final_root / "development_selected.csv",
+        "internal_test": final_root / "internal_test_selected.csv",
+        "external_test1": final_root / "external_test1_selected.csv",
+        "external_test2": final_root / "external_test2_selected.csv",
+    }
 
 
 def _resolve_mask_path(mask_dir: Path, sample_id: str, allowed_suffixes: List[str]) -> Path:
@@ -236,39 +241,40 @@ class _FusionDataset(torch.utils.data.Dataset):
 
 def _align_feature_tables(
     development_table: pd.DataFrame,
-    internal_table: pd.DataFrame,
-    external_table: pd.DataFrame,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    cohort_tables: Mapping[str, pd.DataFrame],
+) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
     feature_cols = list(development_table.columns)
-    for table_name, table in [("internal", internal_table), ("external", external_table)]:
+    aligned_tables: Dict[str, pd.DataFrame] = {}
+    for table_name, table in cohort_tables.items():
         missing = [feat for feat in feature_cols if feat not in table.columns]
         if missing:
             raise RuntimeError(
                 f"The {table_name} selected radiomics table is missing required features. Examples: {missing[:10]}"
             )
-    return (
-        development_table.loc[:, feature_cols].copy(),
-        internal_table.loc[:, feature_cols].copy(),
-        external_table.loc[:, feature_cols].copy(),
-    )
+        aligned_tables[table_name] = table.loc[:, feature_cols].copy()
+    return development_table.loc[:, feature_cols].copy(), aligned_tables
 
 
 def _scale_feature_tables(
     development_table: pd.DataFrame,
-    internal_table: pd.DataFrame,
-    external_table: pd.DataFrame,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    cohort_tables: Mapping[str, pd.DataFrame],
+) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
     imputer = SimpleImputer(strategy="median")
     scaler = StandardScaler()
 
     development_scaled = scaler.fit_transform(imputer.fit_transform(development_table))
-    internal_scaled = scaler.transform(imputer.transform(internal_table))
-    external_scaled = scaler.transform(imputer.transform(external_table))
+    scaled_tables = {
+        table_name: pd.DataFrame(
+            scaler.transform(imputer.transform(table)),
+            index=table.index,
+            columns=table.columns,
+        )
+        for table_name, table in cohort_tables.items()
+    }
 
     return (
         pd.DataFrame(development_scaled, index=development_table.index, columns=development_table.columns),
-        pd.DataFrame(internal_scaled, index=internal_table.index, columns=internal_table.columns),
-        pd.DataFrame(external_scaled, index=external_table.index, columns=external_table.columns),
+        scaled_tables,
     )
 
 
@@ -328,32 +334,48 @@ def build_final_dataloaders(cfg: Mapping[str, Any]) -> Tuple[Dict[str, DataLoade
     label_col = str(get_required(cfg, "columns.label"))
     group_col = str(get_required(cfg, "columns.group"))
     external_patient_id_col = get_optional(cfg, "columns.external_patient_id", default=None)
+    excluded_feature_columns = [
+        label_col,
+        patient_id_col,
+        group_col,
+        str(external_patient_id_col) if external_patient_id_col is not None else "",
+        "label",
+        "patient_id",
+        "group",
+        "cohort_role",
+        "fold_role",
+        "outer_fold",
+    ]
 
     internal_meta = _read_internal_metadata(cfg)
-    external_meta = _read_external_metadata(cfg)
+    external_meta = {split_name: _read_external_metadata(cfg, split_name) for split_name in EXTERNAL_TEST_SPLITS}
     development_group_value = str(get_required(cfg, "dataset_roles.development_group_value"))
     internal_test_group_value = str(get_required(cfg, "dataset_roles.internal_test_group_value"))
 
     development_rows = internal_meta.loc[internal_meta[group_col] == development_group_value].copy()
     internal_test_rows = internal_meta.loc[internal_meta[group_col] == internal_test_group_value].copy()
-    external_rows = external_meta.copy()
 
     if development_rows.empty:
         raise RuntimeError("The development cohort is empty after filtering the internal metadata file.")
+    if internal_test_rows.empty:
+        raise RuntimeError("The internal_test cohort is empty after filtering the internal metadata file.")
+    for split_name, rows in external_meta.items():
+        if rows.empty:
+            raise RuntimeError(f"The {split_name} cohort is empty after reading its metadata file.")
 
-    dev_selected_path, internal_selected_path, external_selected_path = _resolve_final_selected_paths(cfg)
-    development_table = _read_selected_table(dev_selected_path)
-    internal_table = _read_selected_table(internal_selected_path)
-    external_table = _read_selected_table(external_selected_path)
-    development_table, internal_table, external_table = _align_feature_tables(
+    selected_paths = _resolve_final_selected_paths(cfg)
+    development_table = _read_selected_table(selected_paths["development"], excluded_feature_columns)
+    cohort_tables = {
+        split_name: _read_selected_table(selected_paths[split_name], excluded_feature_columns)
+        for split_name in EVALUATION_SPLITS
+    }
+    development_table, cohort_tables = _align_feature_tables(
         development_table,
-        internal_table,
-        external_table,
+        cohort_tables,
     )
-    development_table, internal_table, external_table = _scale_feature_tables(
+    development_table, cohort_tables = _scale_feature_tables(
         development_table,
-        internal_table,
-        external_table,
+        cohort_tables,
     )
 
     suffixes = [str(v) for v in get_required(cfg, "dataset.allowed_image_suffixes")]
@@ -376,23 +398,33 @@ def build_final_dataloaders(cfg: Mapping[str, Any]) -> Tuple[Dict[str, DataLoade
         image_dir=Path(get_required(cfg, "paths.images.internal_test_dir")),
         mask_dir=Path(get_required(cfg, "paths.masks.internal_test_dir")),
         suffixes=suffixes,
-        radiomics_table=internal_table,
+        radiomics_table=cohort_tables["internal_test"],
         cohort_name="internal_test",
     )
-    external_records, external_dropped = _build_rows(
-        external_rows,
-        sample_id_col=sample_id_col,
-        patient_id_col=str(external_patient_id_col) if external_patient_id_col is not None else None,
-        label_col=label_col,
-        image_dir=Path(get_required(cfg, "paths.images.external_test_dir")),
-        mask_dir=Path(get_required(cfg, "paths.masks.external_test_dir")),
-        suffixes=suffixes,
-        radiomics_table=external_table,
-        cohort_name="external_test",
-    )
+    external_records: Dict[str, List[Dict[str, Any]]] = {}
+    external_dropped: Dict[str, Dict[str, int]] = {}
+    for split_name, rows in external_meta.items():
+        records, dropped = _build_rows(
+            rows,
+            sample_id_col=sample_id_col,
+            patient_id_col=str(external_patient_id_col) if external_patient_id_col is not None else None,
+            label_col=label_col,
+            image_dir=Path(get_required(cfg, f"paths.images.{split_name}_dir")),
+            mask_dir=Path(get_required(cfg, f"paths.masks.{split_name}_dir")),
+            suffixes=suffixes,
+            radiomics_table=cohort_tables[split_name],
+            cohort_name=split_name,
+        )
+        external_records[split_name] = records
+        external_dropped[split_name] = dropped
 
     if not development_records:
         raise RuntimeError("The final development training set is empty after intersecting metadata, images, masks, and radiomics.")
+    if not internal_records:
+        raise RuntimeError("The final internal_test set is empty after intersecting metadata, images, masks, and radiomics.")
+    for split_name, records in external_records.items():
+        if not records:
+            raise RuntimeError(f"The final {split_name} set is empty after intersecting metadata, images, masks, and radiomics.")
 
     use_cache = bool(get_optional(cfg, "runtime.use_cache_dataset", default=True))
     cache_rate = float(get_optional(cfg, "runtime.cache_rate", default=1.0)) if use_cache else 0.0
@@ -412,11 +444,14 @@ def build_final_dataloaders(cfg: Mapping[str, Any]) -> Tuple[Dict[str, DataLoade
         base_transform=_build_base_transform(cfg, training=False),
         cache_rate=cache_rate,
     )
-    external_dataset = _FusionDataset(
-        external_records,
-        base_transform=_build_base_transform(cfg, training=False),
-        cache_rate=cache_rate,
-    )
+    external_datasets = {
+        split_name: _FusionDataset(
+            records,
+            base_transform=_build_base_transform(cfg, training=False),
+            cache_rate=cache_rate,
+        )
+        for split_name, records in external_records.items()
+    }
 
     generator = torch.Generator()
     generator.manual_seed(seed)
@@ -439,39 +474,45 @@ def build_final_dataloaders(cfg: Mapping[str, Any]) -> Tuple[Dict[str, DataLoade
         worker_init_fn=seed_worker,
         generator=generator,
     )
-    external_loader = DataLoader(
-        external_dataset,
-        batch_size=eval_batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        worker_init_fn=seed_worker,
-        generator=generator,
-    )
+    external_loaders = {
+        split_name: DataLoader(
+            dataset,
+            batch_size=eval_batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            worker_init_fn=seed_worker,
+            generator=generator,
+        )
+        for split_name, dataset in external_datasets.items()
+    }
 
     log.info(
-        "Final dataloaders ready | development=%d internal=%d external=%d",
+        "Final dataloaders ready | development=%d internal=%d external_test1=%d external_test2=%d",
         len(development_records),
         len(internal_records),
-        len(external_records),
+        len(external_records["external_test1"]),
+        len(external_records["external_test2"]),
     )
 
     metadata = {
         "development_n": int(len(development_records)),
         "internal_test_n": int(len(internal_records)),
-        "external_test_n": int(len(external_records)),
+        "external_test1_n": int(len(external_records["external_test1"])),
+        "external_test2_n": int(len(external_records["external_test2"])),
         "radiomics_input_dim": int(development_table.shape[1]),
         "dropped_rows": {
             "development": development_dropped,
             "internal_test": internal_dropped,
-            "external_test": external_dropped,
+            **external_dropped,
         },
     }
-    return {
+    loaders = {
         "train": train_loader,
         "internal_test": internal_loader,
-        "external_test": external_loader,
-    }, metadata
+        **external_loaders,
+    }
+    return loaders, metadata
 
 
 def main() -> None:

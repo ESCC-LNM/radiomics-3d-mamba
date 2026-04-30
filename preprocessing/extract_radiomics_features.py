@@ -25,7 +25,7 @@ from utils.analysis_utils import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Extract radiomics features for the development, internal held-out, and external held-out cohorts.",
+        description="Extract radiomics features for the development, internal held-out, external_test1, and external_test2 cohorts.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--config", type=Path, required=True, help="Path to the study configuration JSON file.")
@@ -53,11 +53,14 @@ def _read_internal_metadata(cfg: Mapping[str, Any]) -> pd.DataFrame:
     return df
 
 
-def _read_external_metadata(cfg: Mapping[str, Any]) -> pd.DataFrame:
+EXTERNAL_TEST_SPLITS = ("external_test1", "external_test2")
+
+
+def _read_external_metadata(cfg: Mapping[str, Any], split_name: str) -> pd.DataFrame:
     sample_id_col = str(get_required(cfg, "columns.sample_id"))
     label_col = str(get_required(cfg, "columns.label"))
     external_patient_id_col = get_optional(cfg, "columns.external_patient_id", default=None)
-    path = Path(get_required(cfg, "paths.external_metadata_csv"))
+    path = Path(get_required(cfg, f"paths.{split_name}_metadata_csv"))
     dtypes = {sample_id_col: str}
     if external_patient_id_col is not None:
         dtypes[str(external_patient_id_col)] = str
@@ -108,6 +111,24 @@ def _build_extractor(cfg: Mapping[str, Any]):
     return extractor
 
 
+def _resolve_mask_path(mask_dir: Path, sample_id: str, allowed_suffixes: List[str]) -> Path:
+    stems = [
+        sample_id,
+        f"{sample_id}_mask",
+        f"{sample_id}_seg",
+        f"{sample_id}_label",
+        f"{sample_id}-mask",
+        f"{sample_id}-seg",
+        f"{sample_id}-label",
+    ]
+    for stem in stems:
+        for suffix in allowed_suffixes:
+            candidate = mask_dir / f"{stem}{suffix}"
+            if candidate.exists():
+                return candidate
+    raise FileNotFoundError(f"Could not resolve a mask file for sample '{sample_id}' in '{mask_dir}'.")
+
+
 def _extract_subset(
     rows: pd.DataFrame,
     *,
@@ -126,7 +147,7 @@ def _extract_subset(
     for _, row in rows.iterrows():
         sample_id = normalize_sample_id(row[sample_id_col])
         image_path = resolve_image_path(image_dir, sample_id, allowed_suffixes)
-        mask_path = resolve_image_path(mask_dir, sample_id, allowed_suffixes)
+        mask_path = _resolve_mask_path(mask_dir, sample_id, allowed_suffixes)
         feature_vector = extractor.execute(str(image_path), str(mask_path))
         clean_features = {
             str(k): v
@@ -164,11 +185,10 @@ def main() -> None:
     include_patient_id = bool(get_optional(cfg, "radiomics_extraction.include_patient_id_column", default=False))
 
     internal_metadata = _read_internal_metadata(cfg)
-    external_metadata = _read_external_metadata(cfg)
+    external_metadata = {split_name: _read_external_metadata(cfg, split_name) for split_name in EXTERNAL_TEST_SPLITS}
 
     development_rows = internal_metadata.loc[internal_metadata[group_col].astype(str) == development_group_value].copy()
     internal_test_rows = internal_metadata.loc[internal_metadata[group_col].astype(str) == internal_test_group_value].copy()
-    external_rows = external_metadata.copy()
 
     extractor = _build_extractor(cfg)
 
@@ -187,14 +207,15 @@ def main() -> None:
             "output_path": Path(get_required(cfg, "paths.radiomics.internal_test_raw_csv")),
             "patient_id_col": patient_id_col,
         },
-        "external_test": {
-            "rows": external_rows,
-            "image_dir": Path(get_required(cfg, "paths.images.external_test_dir")),
-            "mask_dir": Path(get_required(cfg, "paths.masks.external_test_dir")),
-            "output_path": Path(get_required(cfg, "paths.radiomics.external_test_raw_csv")),
-            "patient_id_col": get_optional(cfg, "columns.external_patient_id", default=None),
-        },
     }
+    for split_name, rows in external_metadata.items():
+        outputs[split_name] = {
+            "rows": rows,
+            "image_dir": Path(get_required(cfg, f"paths.images.{split_name}_dir")),
+            "mask_dir": Path(get_required(cfg, f"paths.masks.{split_name}_dir")),
+            "output_path": Path(get_required(cfg, f"paths.radiomics.{split_name}_raw_csv")),
+            "patient_id_col": get_optional(cfg, "columns.external_patient_id", default=None),
+        }
 
     for subset_name, bundle in outputs.items():
         if bundle["rows"].empty:
