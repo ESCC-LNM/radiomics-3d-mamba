@@ -17,7 +17,7 @@ if not log.handlers:
     )
 
 # =============================================================================
-# Mamba dependency (Strict requirement aligned with fusion script)
+# Mamba dependency 
 # =============================================================================
 try:
     from mamba_ssm import Mamba
